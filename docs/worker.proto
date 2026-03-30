@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package worker.v1;
+
+option go_package = "github.com/MarkDHarris/JobWorkerService/api/v1;workerv1";
+
+// Remote job execution service, secured with mTLS.
+service WorkerService {
+  // Starts a process and returns a job ID. Caller becomes the owner.
+  rpc CreateJob(CreateJobRequest) returns (CreateJobResponse);
+
+  // Kills the job's process group (SIGKILL). Idempotent.
+  rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
+
+  // Returns current state, exit code, and owner.
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+
+  // Streams all output from the beginning, then follows live.
+  rpc WatchJobOutput(WatchJobOutputRequest) returns (stream OutputChunk);
+
+  // Grants another cert CN read access to a job.
+  rpc ShareJob(ShareJobRequest) returns (ShareJobResponse);
+}
+
+enum JobState {
+  JOB_STATE_UNSPECIFIED = 0;
+  JOB_STATE_RUNNING     = 1;
+  JOB_STATE_COMPLETED   = 2;
+  JOB_STATE_FAILED      = 3;
+  JOB_STATE_STOPPED     = 4;
+}
+
+message CreateJobRequest {
+  // Passed directly to exec. argv[0] is the executable, rest are args.
+  repeated string argv = 1;
+}
+
+message CreateJobResponse {
+  string job_id = 1;
+}
+
+message CancelJobRequest {
+  string job_id = 1;
+}
+
+message CancelJobResponse {}
+
+message GetStatusRequest {
+  string job_id = 1;
+}
+
+message GetStatusResponse {
+  JobState state = 1;
+  int32 exit_code = 2; // -1 while running
+  string owner = 3;
+}
+
+message ShareJobRequest {
+  string job_id = 1;
+  string subject_cn = 2; // cert CN to grant read access to
+}
+
+message ShareJobResponse {}
+
+message WatchJobOutputRequest {
+  string job_id = 1;
+}
+
+// Bytes not string — output may contain binary data.
+message OutputChunk {
+  bytes data = 1;
+}
