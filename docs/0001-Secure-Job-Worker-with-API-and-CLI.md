@@ -329,5 +329,13 @@ handshake.
   watcher goroutine calls `Broadcast()` to unblock the reader, which checks
   `ctx.Err()` and exits cleanly. No goroutine leak.
 
-- **Empty argv** — Rejected at the gRPC handler with `INVALID_ARGUMENT` before
-  reaching the worker library.
+- **CLI Validation** — usability-focused validation (required parameters,
+  basic argument sanity checks).
+
+- **gRPC Validation** — trust-boundary validation of incoming requests
+  (required fields, allowed values, safety constraints; empty
+  argv is rejected with `INVALID_ARGUMENT` before reaching the worker
+  library; may evolve to include sanitization and policy enforcement).
+
+- **Core Library** — invariant and consistency-focused validation (
+  enforcing valid state transitions and internal correctness guarantees).
