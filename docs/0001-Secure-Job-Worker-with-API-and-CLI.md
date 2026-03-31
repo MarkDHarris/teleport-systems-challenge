@@ -40,8 +40,7 @@ granting a shell.
   identities are denied by default.
 
 - **Complete process lifecycle management** — Start, stop, and query status of
-  jobs. Stopped jobs terminate the entire process group (parent and all children)
-  to prevent orphaned processes.
+  jobs. Stopped jobs are terminated by killing the process directly.
 
 - **Efficient and binary-safe output streaming** — Replay all output from the start
   of execution and follow live output without busy-waiting or polling.
