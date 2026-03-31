@@ -262,10 +262,13 @@ needed and weak options can not be selected.
 **Authentication:** Mutual TLS. The server is configured with
 `ClientAuth: tls.RequireAndVerifyClientCert` and a CA certificate pool. Both
 client and server present certificates signed by a shared CA. Identity is
-established cryptographically before application data can be exchanged. I still
-need to work out the exact cert generation workflow but my current plan is a
-shell script using `openssl` or Go's `crypto/x509` package to create a
-self-signed CA and issue test certs.
+established cryptographically before application data can be exchanged.
+Certificates will include appropriate Extended Key Usage (EKU) constraints
+(e.g., ClientAuth for clients and ServerAuth for servers) to limit their
+intended use. Enforcement of these constraints will occur during TLS
+verification. All certificates will use RSA 4096-bit keys. ECDSA (P-256) could
+be a lighter-weight alternative with smaller keys and faster handshakes, but
+I think RSA 4096 is a straightforward and widely supported choice.
 
 **Authorization** uses two fields from the client's X.509 certificate to make
 access decisions:
