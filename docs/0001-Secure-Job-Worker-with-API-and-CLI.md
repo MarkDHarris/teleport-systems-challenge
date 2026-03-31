@@ -86,6 +86,11 @@ granting a shell.
 - **Full configurability** — Hardcoded defaults are preferred over configuration
   files or environment variable parsing. TODOs will document.
 
+- **Process group termination** - This design explicitly does not include process
+  group management or hierarchical termination of child processes. As a result,
+  Stop() guarantees termination of the immediate process started by exec.Cmd,
+  but does not ensure cleanup of any subprocesses it may have spawned.
+
 ## Design
 
 The implementation separates concerns across three components:
