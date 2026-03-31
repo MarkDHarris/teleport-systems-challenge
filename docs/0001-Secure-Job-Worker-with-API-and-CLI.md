@@ -317,9 +317,10 @@ handshake.
 
 ## Edge Cases
 
-- **Executable not found** — `exec.Command.Start()` returns an error. The job
-  transitions to `Failed` with exit code -1. The gRPC response uses `INTERNAL`
-  with a generic message to avoid leaking OS-level details.
+- **Executable not found** — `exec.Command.Start()` returns an error. The gRPC
+  response returns `INVALID_ARGUMENT` with the executable name so the caller
+  knows what failed. Other internal errors (path lookup, permission, etc) can
+  use `INTERNAL` with a generic message to avoid leaking OS-level details.
 
 - **Cancel on a finished job** — `CancelJob` is idempotent. Calling it on a
   `Completed` or `Failed` job returns success.
