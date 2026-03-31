@@ -120,8 +120,7 @@ checks without blocking each other.
 - A `context.CancelFunc` used by `Stop()` to trigger process termination.
   A standalone context is created per job with `context.WithCancel`. A dedicated
   goroutine blocks on `<-ctx.Done()` and calls `cmd.Process.Kill()` when it
-  fires. Process group termination (`Setpgid` + `syscall.Kill(-pgid, SIGKILL)`)
-  was considered but moved out of scope to reduce complexity.
+  fires.
 - An `Owner` string — the certificate CN of the client that created the job.
   Set once at creation time and never modified.
 
