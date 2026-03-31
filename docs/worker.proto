@@ -17,9 +17,6 @@ service WorkerService {
 
   // Streams all output from the beginning, then follows live.
   rpc WatchJobOutput(WatchJobOutputRequest) returns (stream OutputChunk);
-
-  // Grants another cert CN read access to a job.
-  rpc ShareJob(ShareJobRequest) returns (ShareJobResponse);
 }
 
 enum JobState {
@@ -54,13 +51,6 @@ message GetStatusResponse {
   int32 exit_code = 2; // -1 while running
   string owner = 3;
 }
-
-message ShareJobRequest {
-  string job_id = 1;
-  string subject_cn = 2; // cert CN to grant read access to
-}
-
-message ShareJobResponse {}
 
 message WatchJobOutputRequest {
   string job_id = 1;

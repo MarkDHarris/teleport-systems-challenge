@@ -36,8 +36,8 @@ granting a shell.
   authentication protocols.
 
 - **Owner-scoped authorization** — Jobs are owned by the certificate identity
-  that created them. Only the owner, explicitly granted viewers, or an admin can
-  access a job. Unrecognized identities are denied by default.
+  that created them. Only the owner or an admin can access a job. Unrecognized
+  identities are denied by default.
 
 - **Complete process lifecycle management** — Start, stop, and query status of
   jobs. Stopped jobs terminate the entire process group (parent and all children)
@@ -77,10 +77,9 @@ granting a shell.
 - **Performance optimization or scaling** — No connection pooling, caching, or load
   balancing.
 
-- **Dynamic policy or delegation chains** — The admin designation is a static
-  check on the certificate OU. Job sharing is single-level (owner grants to a
-  specific CN) with no transitive re-sharing, group-based grants, or runtime
-  policy reload.
+- **Dynamic policy or delegation** — The admin designation is a static check on
+  the certificate OU. There is no runtime policy reload, group-based access, or
+  delegated sharing.
 
 - **Persistent job history or log retention** — Job state and output exist only
   in memory for the lifetime of the server process.
@@ -124,9 +123,6 @@ checks without blocking each other.
 - A `context.CancelFunc` used by `Stop()` to trigger process group termination.
 - An `Owner` string — the certificate CN of the client that created the job.
   Set once at creation time and never modified.
-- An `AllowedViewers` map (`map[string]struct{}`) — certificate CNs that the
-  owner has explicitly granted access to via `ShareJob`. Protected by the job's
-  mutex.
 
 When a job is created (via `CreateJob`), the manager:
 
@@ -233,28 +229,12 @@ $ jobctl --cert alice.crt --key alice.key \
 ...
 ^C
 
-# Bob tries to view Alice's job — denied (bob is not the owner)
+# Bob tries to view Alice's job — denied (bob is not the owner or an admin)
 $ jobctl --cert bob.crt --key bob.key \
     status a1b2c3d4-e5f6-7890-abcd-ef1234567890
-Error: permission denied: not the job owner or a granted viewer
+Error: permission denied: only the job owner or an admin can perform this action
 
-# Alice shares the job with Bob
-$ jobctl --cert alice.crt --key alice.key \
-    share a1b2c3d4-e5f6-7890-abcd-ef1234567890 bob
-Access granted: bob can now view job a1b2c3d4-e5f6-7890-abcd-ef1234567890
-
-# Now Bob can watch output
-$ jobctl --cert bob.crt --key bob.key \
-    watch a1b2c3d4-e5f6-7890-abcd-ef1234567890
-/var/log/syslog
-...
-
-# Bob cannot cancel Alice's job — only the owner or admin can cancel
-$ jobctl --cert bob.crt --key bob.key \
-    cancel a1b2c3d4-e5f6-7890-abcd-ef1234567890
-Error: permission denied: only the job owner or an admin can cancel a job
-
-# An admin can cancel any job regardless of ownership
+# An admin can access and cancel any job regardless of ownership
 $ jobctl --cert admin.crt --key admin.key \
     cancel a1b2c3d4-e5f6-7890-abcd-ef1234567890
 Job cancelled: a1b2c3d4-e5f6-7890-abcd-ef1234567890
@@ -325,10 +305,6 @@ handshake.
 - **Unbounded output buffer** — Long-running jobs with large output could consume
   memory without limit. A production system would cap buffer size or write to
   disk or database. This could be captured as future enhancements.
-
-- **Sharing is additive and irrevocable** — Once a job is shared with a CN, that
-  access cannot be revoked without restarting the server. A production system
-  would add an `UnshareJob` RPC.
 
 ## Edge Cases
 
