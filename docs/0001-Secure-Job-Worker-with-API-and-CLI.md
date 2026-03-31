@@ -204,7 +204,8 @@ caller is the job owner or an admin before proceeding.
 
 The CLI (`jobctl`) will be built with [spf13/cobra](https://github.com/spf13/cobra)
 and provide subcommands that map 1:1 to the gRPC RPCs. All commands will require a
-`--server` flag (defaulting to `localhost:50055`) and certificate paths for mTLS.
+`--server` flag (defaulting to `localhost:50055`), client certificate and key paths
+(`--cert`, `--key`), and a CA certificate path (`--ca`) for mTLS.
 
 ### UX
 
