@@ -266,8 +266,8 @@ self-signed CA and issue test certs.
 access decisions:
 
 - **Common Name (CN)** - the user's unique identity (e.g., `alice`, `bob`,
-  `deploy-bot`). This is the string recorded as the job owner and used for
-  sharing grants.
+  `deploy-bot`). This is the string recorded as the job owner. Must be
+  non-empty; connections with an empty CN are rejected.
 - **Organizational Unit (OU)** - the user's privilege class. The only privileged
   value is `admin`. Any other OU (or no OU at all) is treated as a regular user.
 
