@@ -113,27 +113,30 @@ checks without blocking each other.
 
 **Job** represents a single process. Each job holds:
 
-- An `exec.Cmd` configured with `Setpgid: true` so the process and all its
-  children share a process group to enable clean termination using
-  `syscall.Kill(-pgid, SIGKILL)`.
+- An `exec.Cmd` for the spawned process.
 - A lifecycle state machine: `Running -> Completed | Failed | Stopped`.
-- An `OutputBuffer` — an append-only `[]byte` with a `sync.Cond` for
+- An `OutputBuffer` - an append-only `[]byte` with a `sync.Cond` for
   notification.
-- A `context.CancelFunc` used by `Stop()` to trigger process group termination.
+- A `context.CancelFunc` used by `Stop()` to trigger process termination.
+  A standalone context is created per job with `context.WithCancel`. A dedicated
+  goroutine blocks on `<-ctx.Done()` and calls `cmd.Process.Kill()` when it
+  fires. Process group termination (`Setpgid` + `syscall.Kill(-pgid, SIGKILL)`)
+  was considered but moved out of scope to reduce complexity.
 - An `Owner` string — the certificate CN of the client that created the job.
   Set once at creation time and never modified.
 
 When a job is created (via `CreateJob`), the manager:
 
 1. Generates a UUID for the job.
-2. Creates an `exec.Cmd` from the argv (the first element is the
+2. Stores the job in the map so it is immediately discoverable by other RPCs.
+3. Creates an `exec.Cmd` from the argv (the first element is the
    executable, the remaining are arguments).
-3. Connects `cmd.Stdout` and `cmd.Stderr` to the output buffer.
-4. Starts the process with `Setpgid: true`.
-5. Launches a goroutine that calls `cmd.Wait()` and transitions the state to
+4. Connects `cmd.Stdout` and `cmd.Stderr` to the output buffer.
+5. Starts the process.
+6. Launches a goroutine that calls `cmd.Wait()` and transitions the state to
    `Completed` (exit 0), `Failed` (non-zero exit), or `Stopped` (cancelled by
    user via `CancelJob`).
-6. Stores the job and returns the ID.
+7. Returns the ID.
 
 ### Output Streaming
 
@@ -179,15 +182,14 @@ the need for an external dependency.
 
 ### gRPC Server
 
-The server implements five RPCs defined in `worker.proto`:
+The server implements four RPCs defined in `worker.proto`:
 
 | RPC | Type | Description |
 | ----- | ------ | ------------- |
 | `CreateJob` | Unary | Launches a process, returns a job ID. Caller becomes owner. |
-| `CancelJob` | Unary | Sends SIGKILL to the job's process group. Owner or admin only. |
+| `CancelJob` | Unary | Kills the job's process. Owner or admin only. |
 | `GetStatus` | Unary | Returns lifecycle state, exit code, and owner CN. |
 | `WatchJobOutput` | Server-streaming | Replays output from start, then follows live. |
-| `ShareJob` | Unary | Grants a certificate CN read access to a job. Owner or admin only. |
 
 The server is a thin translation layer between gRPC types and the worker library.
 Domain errors (e.g., `ErrJobNotFound`) are mapped to gRPC status codes
@@ -197,7 +199,7 @@ leaking OS-level details to clients.
 Authorization is enforced per-request. A gRPC interceptor extracts the caller's
 identity (CN and OU) from the verified peer certificate and attaches it to the
 request context. Handlers that operate on a specific job then check that the
-caller is the job owner, a granted viewer, or an admin before proceeding.
+caller is the job owner or an admin before proceeding.
 
 ### CLI Client
 
