@@ -28,9 +28,8 @@ granting a shell.
 ## Goals
 
 - **Secure remote job execution** — Execute arbitrary Linux processes on a single
-  host with a special purpose API to avoid granting interactive shell access.
-  Commands are executed directly without shell interpretation to mitigate shell
-  injection as an attack surface.
+  host with a special purpose API. Commands are executed directly without shell
+  interpretation to mitigate shell injection as an attack surface.
 
 - **mTLS-only authentication** — Mutual TLS with TLS 1.3. Identity is
   established cryptographically at the transport layer with no additional
