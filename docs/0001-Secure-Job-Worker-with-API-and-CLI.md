@@ -120,8 +120,16 @@ checks without blocking each other.
 
 - An `exec.Cmd` for the spawned process.
 - A lifecycle state machine: `Running -> Completed | Failed | Stopped`.
-- An `OutputBuffer` - an append-only `[]byte` with a `sync.Cond` for
-  notification.
+- An `OutputBuffer` — an append-only `[][]byte` guarded by the job's
+  `sync.Cond`. Each `Write()` call appends one chunk; `Stream()` returns chunks
+  by index, mapping naturally to gRPC `OutputChunk` messages. 
+  > The `Job` implements `io.Writer` so it can be assigned directly
+  to `cmd.Stdout` and `cmd.Stderr` — this lets `exec.Cmd` write directly to
+  the provided writer via its internal `io.Copy` based goroutines and avoids the documented
+  potential for blocking or deadlock when using
+  [StdoutPipe](https://pkg.go.dev/os/exec#Cmd.StdoutPipe)/
+  [StderrPipe](https://pkg.go.dev/os/exec#Cmd.StderrPipe) together with
+  [Wait](https://pkg.go.dev/os/exec#Cmd.Wait).
 - A `context.CancelFunc` used by `Stop()` to trigger process termination.
   A standalone context is created per job with `context.WithCancel`. A dedicated
   goroutine blocks on `<-ctx.Done()` and calls `cmd.Process.Kill()` when it
