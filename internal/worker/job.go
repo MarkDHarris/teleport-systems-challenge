@@ -61,6 +61,7 @@ type Job struct {
 	cancel   context.CancelFunc
 	stopped  bool
 
+	outputBuffer *outputBuffer
 }
 
 // ID returns the job identifier.
@@ -69,26 +70,13 @@ func (j *Job) ID() string { return j.id }
 // Owner returns the job owner.
 func (j *Job) Owner() string { return j.owner }
 
-// Write appends one chunk of process output
+// Write appends one chunk of process output (stdout/stderr from the subprocess).
 func (j *Job) Write(p []byte) (n int, err error) {
-	j.outputMu.Lock()
-	defer j.outputMu.Unlock()
-
-	chunk := make([]byte, len(p))
-	copy(chunk, p)
-
-	j.outputChunks = append(j.outputChunks, chunk)
-	j.outputCond.Broadcast()
-
-	return len(p), nil
+	return j.outputBuffer.Write(p)
 }
 
 func (j *Job) closeOutput() {
-	j.outputMu.Lock()
-	defer j.outputMu.Unlock()
-
-	j.outputDone = true
-	j.outputCond.Broadcast()
+	j.outputBuffer.close()
 }
 
 // Start creates & starts a new job
@@ -107,8 +95,8 @@ func Start(id, owner string, argv []string) (*Job, error) {
 		state:        JobStateRunning,
 		cmd:          cmd,
 		cancel:       cancel,
+		outputBuffer: newOutputBuffer(),
 	}
-	j.outputCond = sync.NewCond(&j.outputMu)
 	cmd.Stdout = j
 	cmd.Stderr = j
 
@@ -155,45 +143,7 @@ func Start(id, owner string, argv []string) (*Job, error) {
 
 // Stream allows streaming the job's output in real-time
 func (j *Job) Stream(ctx context.Context, fn func([]byte) error) error {
-	return j.forEachOutputChunk(ctx, fn)
-}
-
-func (j *Job) forEachOutputChunk(ctx context.Context, fn func([]byte) error) error {
-	cancelAfterFunc := context.AfterFunc(ctx, func() {
-		j.outputCond.L.Lock()
-		defer j.outputCond.L.Unlock()
-		j.outputCond.Broadcast()
-	})
-	defer cancelAfterFunc()
-
-	var index int
-
-	j.outputMu.Lock()
-	defer j.outputMu.Unlock()
-
-	for {
-		for index < len(j.outputChunks) {
-			chunk := j.outputChunks[index]
-			index++
-
-			j.outputMu.Unlock()
-			if err := fn(chunk); err != nil {
-				j.outputMu.Lock()
-				return err
-			}
-			j.outputMu.Lock()
-		}
-
-		if j.outputDone {
-			return nil
-		}
-
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		j.outputCond.Wait()
-	}
+	return j.outputBuffer.forEachChunk(ctx, fn)
 }
 
 // Status returns the current status of the job
