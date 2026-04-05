@@ -20,13 +20,19 @@ const (
 
 // JobStatus provides a snapshot of a job's current status
 type JobStatus struct {
-	ID       string
-	Owner    string
+	id       string
+	owner    string
 	State    JobState
 	ExitCode int
 }
 
-// String returns a readable representation of the JobState
+// the job identifier.
+func (s JobStatus) ID() string { return s.id }
+
+// the job owner.
+func (s JobStatus) Owner() string { return s.owner }
+
+// readable representation of the JobState
 func (s JobState) String() string {
 	switch s {
 	case JobStateUnspecified:
@@ -46,8 +52,8 @@ func (s JobState) String() string {
 
 // Job represents a Linux process
 type Job struct {
-	ID       string
-	Owner    string
+	id       string
+	owner    string
 	mu       sync.RWMutex
 	state    JobState
 	exitCode int
@@ -55,11 +61,13 @@ type Job struct {
 	cancel   context.CancelFunc
 	stopped  bool
 
-	outputMu     sync.Mutex
-	outputCond   *sync.Cond
-	outputChunks [][]byte
-	outputDone   bool
 }
+
+// ID returns the job identifier.
+func (j *Job) ID() string { return j.id }
+
+// Owner returns the job owner.
+func (j *Job) Owner() string { return j.owner }
 
 // Write appends one chunk of process output
 func (j *Job) Write(p []byte) (n int, err error) {
@@ -94,11 +102,11 @@ func Start(id, owner string, argv []string) (*Job, error) {
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 
 	j := &Job{
-		ID:     id,
-		Owner:  owner,
-		state:  JobStateRunning,
-		cmd:    cmd,
-		cancel: cancel,
+		id:           id,
+		owner:        owner,
+		state:        JobStateRunning,
+		cmd:          cmd,
+		cancel:       cancel,
 	}
 	j.outputCond = sync.NewCond(&j.outputMu)
 	cmd.Stdout = j
@@ -193,8 +201,8 @@ func (j *Job) Status() JobStatus {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
 	return JobStatus{
-		ID:       j.ID,
-		Owner:    j.Owner,
+		id:       j.id,
+		owner:    j.owner,
 		State:    j.state,
 		ExitCode: j.exitCode,
 	}

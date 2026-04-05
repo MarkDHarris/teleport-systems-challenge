@@ -59,8 +59,8 @@ func TestJobManagerCreateJob(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GetJob() error = %v", err)
 			}
-			if job.Owner != tt.owner {
-				t.Errorf("owner = %q, want %q", job.Owner, tt.owner)
+			if job.Owner() != tt.owner {
+				t.Errorf("owner = %q, want %q", job.Owner(), tt.owner)
 			}
 		})
 	}

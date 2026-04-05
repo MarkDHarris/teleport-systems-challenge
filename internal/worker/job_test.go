@@ -61,11 +61,11 @@ func TestJobSuccessful(t *testing.T) {
 	if s.ExitCode != 0 {
 		t.Errorf("exit code = %d, want 0", s.ExitCode)
 	}
-	if s.Owner != "mark" {
-		t.Errorf("owner = %q, want 'mark'", s.Owner)
+	if s.Owner() != "mark" {
+		t.Errorf("owner = %q, want 'mark'", s.Owner())
 	}
-	if s.ID != "job-id-success" {
-		t.Errorf("id = %q, want 'job-id-success'", s.ID)
+	if s.ID() != "job-id-success" {
+		t.Errorf("id = %q, want 'job-id-success'", s.ID())
 	}
 }
 
