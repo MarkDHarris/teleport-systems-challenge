@@ -6,8 +6,6 @@ import (
 	"sync"
 )
 
-var _ io.Writer = (*outputBuffer)(nil)
-
 type outputBuffer struct {
 	mu     sync.Mutex
 	cond   *sync.Cond
@@ -71,9 +69,10 @@ func (b *outputBuffer) forEachChunk(ctx context.Context, fn func([]byte) error) 
 			}
 			chunk := b.chunks[index]
 			index++
+			payload := append([]byte(nil), chunk...)
 
 			b.mu.Unlock()
-			if err := fn(chunk); err != nil {
+			if err := fn(payload); err != nil {
 				b.mu.Lock()
 				return err
 			}
