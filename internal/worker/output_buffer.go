@@ -65,7 +65,7 @@ func (b *outputBuffer) forEachChunk(ctx context.Context, fn func([]byte) error) 
 	defer b.mu.Unlock()
 
 	for {
-		for index < len(b.chunks) {
+		if index < len(b.chunks) {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
@@ -78,6 +78,7 @@ func (b *outputBuffer) forEachChunk(ctx context.Context, fn func([]byte) error) 
 				return err
 			}
 			b.mu.Lock()
+			continue
 		}
 
 		if b.done {
