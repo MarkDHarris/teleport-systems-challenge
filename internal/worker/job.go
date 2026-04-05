@@ -40,7 +40,7 @@ func (s JobState) String() string {
 	case JobStateStopped:
 		return "STOPPED"
 	default:
-		return "UNKNOWN"
+		return fmt.Sprintf("UNKNOWN[%d]", s)
 	}
 }
 
