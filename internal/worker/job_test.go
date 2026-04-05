@@ -14,11 +14,12 @@ func TestJobStateString(t *testing.T) {
 		state JobState
 		want  string
 	}{
+		{JobStateUnspecified, "UNSPECIFIED"},
 		{JobStateRunning, "RUNNING"},
 		{JobStateCompleted, "COMPLETED"},
 		{JobStateFailed, "FAILED"},
 		{JobStateStopped, "STOPPED"},
-		{JobState(99), "UNKNOWN"},
+		{JobState(99), "UNKNOWN[99]"},
 	}
 
 	for _, tt := range tests {

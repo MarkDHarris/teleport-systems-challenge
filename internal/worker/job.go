@@ -8,11 +8,11 @@ import (
 	"sync"
 )
 
-// JobState represents the running state of a job.
 type JobState int
 
 const (
-	JobStateRunning JobState = iota
+	JobStateUnspecified JobState = iota
+	JobStateRunning
 	JobStateCompleted
 	JobStateFailed
 	JobStateStopped
@@ -29,6 +29,8 @@ type JobStatus struct {
 // String returns a readable representation of the JobState
 func (s JobState) String() string {
 	switch s {
+	case JobStateUnspecified:
+		return "UNSPECIFIED"
 	case JobStateRunning:
 		return "RUNNING"
 	case JobStateCompleted:
