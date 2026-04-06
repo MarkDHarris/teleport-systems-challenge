@@ -285,8 +285,7 @@ func TestOutputBufferReadCancelWhileWaiting(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	done := make(chan error, 1)
-	firstReadDone := make(chan struct{})
-	releaseBlockingRead := make(chan struct{})
+	handshake := make(chan struct{})
 
 	go func() {
 		r := b.newReader(ctx)
@@ -297,15 +296,19 @@ func TestOutputBufferReadCancelWhileWaiting(t *testing.T) {
 			done <- err
 			return
 		}
-		close(firstReadDone)
-		<-releaseBlockingRead
+		handshake <- struct{}{}
+		<-handshake
 
 		_, err := r.Read(make([]byte, 64))
 		done <- err
 	}()
 
-	<-firstReadDone
-	releaseBlockingRead <- struct{}{}
+	select {
+	case <-handshake:
+	case err := <-done:
+		t.Fatalf("priming read: %v", err)
+	}
+	handshake <- struct{}{}
 	cancel()
 
 	select {
