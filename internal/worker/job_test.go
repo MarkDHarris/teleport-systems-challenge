@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"io"
 	"testing"
 	"time"
 )
@@ -118,13 +119,11 @@ func TestJobWithStdoutOutput(t *testing.T) {
 
 	testHelperWaitForState(t, job, JobStateCompleted, 5*time.Second)
 
-	var output []byte
-	err = job.Stream(context.Background(), func(data []byte) error {
-		output = append(output, data...)
-		return nil
-	})
+	r := job.OutputReader(context.Background())
+	output, err := io.ReadAll(r)
+	_ = r.Close()
 	if err != nil {
-		t.Fatalf("Stream() error = %v", err)
+		t.Fatalf("ReadAll(OutputReader) error = %v", err)
 	}
 
 	if string(output) != "hello test output" {
@@ -141,13 +140,11 @@ func TestJobWithStderrOutput(t *testing.T) {
 
 	testHelperWaitForState(t, job, JobStateCompleted, 5*time.Second)
 
-	var output []byte
-	err = job.Stream(context.Background(), func(data []byte) error {
-		output = append(output, data...)
-		return nil
-	})
+	r := job.OutputReader(context.Background())
+	output, err := io.ReadAll(r)
+	_ = r.Close()
 	if err != nil {
-		t.Fatalf("Stream() error = %v", err)
+		t.Fatalf("ReadAll(OutputReader) error = %v", err)
 	}
 
 	if string(output) != "error msg" {

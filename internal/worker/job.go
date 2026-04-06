@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"sync"
 )
@@ -26,13 +27,13 @@ type JobStatus struct {
 	ExitCode int
 }
 
-// the job identifier.
+// ID returns the job identifier.
 func (s JobStatus) ID() string { return s.id }
 
-// the job owner.
+// Owner returns the job owner.
 func (s JobStatus) Owner() string { return s.owner }
 
-// readable representation of the JobState
+// String returns a readable representation of the JobState
 func (s JobState) String() string {
 	switch s {
 	case JobStateUnspecified:
@@ -52,34 +53,24 @@ func (s JobState) String() string {
 
 // Job represents a Linux process
 type Job struct {
-	id       string
-	owner    string
-	mu       sync.RWMutex
-	state    JobState
-	exitCode int
-	cmd      *exec.Cmd
-	cancel   context.CancelFunc
-	stopped  bool
-
+	id           string
+	owner        string
+	mu           sync.RWMutex
+	state        JobState
+	exitCode     int
+	cmd          *exec.Cmd
+	cancel       context.CancelFunc
+	stopped      bool
 	outputBuffer *outputBuffer
 }
 
-// ID returns the job identifier.
+// ID returns the job identifier
 func (j *Job) ID() string { return j.id }
 
-// Owner returns the job owner.
+// returns the job owner
 func (j *Job) Owner() string { return j.owner }
 
-// Write appends one chunk of process output (stdout/stderr from the subprocess).
-func (j *Job) Write(p []byte) (n int, err error) {
-	return j.outputBuffer.Write(p)
-}
-
-func (j *Job) closeOutput() {
-	j.outputBuffer.close()
-}
-
-// Start creates & starts a new job
+// creates & starts a new job
 func Start(id, owner string, argv []string) (*Job, error) {
 	if len(argv) == 0 {
 		return nil, ErrEmptyArgv
@@ -97,8 +88,8 @@ func Start(id, owner string, argv []string) (*Job, error) {
 		cancel:       cancel,
 		outputBuffer: newOutputBuffer(),
 	}
-	cmd.Stdout = j
-	cmd.Stderr = j
+	cmd.Stdout = j.outputBuffer
+	cmd.Stderr = j.outputBuffer
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -115,7 +106,7 @@ func Start(id, owner string, argv []string) (*Job, error) {
 			j.state = JobStateStopped
 			j.exitCode = -1
 			j.mu.Unlock()
-			j.closeOutput()
+			j.outputBuffer.close()
 			return
 		}
 
@@ -128,25 +119,26 @@ func Start(id, owner string, argv []string) (*Job, error) {
 				j.exitCode = -1
 			}
 			j.mu.Unlock()
-			j.closeOutput()
+			j.outputBuffer.close()
 			return
 		}
 
 		j.state = JobStateCompleted
 		j.exitCode = 0
 		j.mu.Unlock()
-		j.closeOutput()
+		j.outputBuffer.close()
 	}()
 
 	return j, nil
 }
 
-// Stream allows streaming the job's output in real-time
-func (j *Job) Stream(ctx context.Context, fn func([]byte) error) error {
-	return j.outputBuffer.forEachChunk(ctx, fn)
+// returns io.ReadCloser that replays the job's output from the
+// beginning and blocks for data until closed
+func (j *Job) OutputReader(ctx context.Context) io.ReadCloser {
+	return j.outputBuffer.newReader(ctx)
 }
 
-// Status returns the current status of the job
+// current status of the job
 func (j *Job) Status() JobStatus {
 	j.mu.RLock()
 	defer j.mu.RUnlock()

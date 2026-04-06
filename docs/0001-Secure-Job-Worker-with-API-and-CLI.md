@@ -88,8 +88,8 @@ granting a shell.
 
 - **Process group termination** - This design explicitly does not include process
   group management or hierarchical termination of child processes. As a result,
-  Stop() guarantees termination of the immediate process started by exec.Cmd,
-  but does not ensure cleanup of any subprocesses it may have spawned.
+  `Cancel()` / `CancelJob()` guarantees termination of the immediate process started
+  by `exec.Cmd`, but does not ensure cleanup of any subprocesses it may have spawned.
 
 ## Design
 
@@ -119,30 +119,38 @@ checks without blocking each other.
 **Job** represents a single process. Each job holds:
 
 - An `exec.Cmd` for the spawned process.
-- A lifecycle state machine: `Running -> Completed | Failed | Stopped`.
-- Append-only output collection in a field `outputChunks` holding `[][]byte`
-  and guarded by a `sync.Cond` for efficient streaming to multiple clients.
-  Each `Write()` appends a chunk and calls `Broadcast()`, while `Stream()` waits
-  for new chunks when it reaches the end of the buffer.
-  > The `Job` implements `io.Writer` so it can be assigned directly
-  to `cmd.Stdout` and `cmd.Stderr` — this lets `exec.Cmd` write directly to
-  the provided writer via its internal `io.Copy` based goroutines and avoids the documented
-  potential for blocking or deadlock when using
+- A lifecycle state machine: `Unspecified` (zero value only) → `Running` →
+  `Completed | Failed | Stopped`. Integer values for `JobState` match
+  `worker.v1.JobState` in `worker.proto` (e.g. `JOB_STATE_UNSPECIFIED = 0`,
+  `JOB_STATE_RUNNING = 1`), so the library aligns with gRPC enums.
+- An **`outputBuffer`** — a separate type that owns a single append-only byte
+  slice (`[]byte`), a mutex, and a `sync.Cond` for efficient streaming to
+  multiple clients. `cmd.Stdout` and `cmd.Stderr` are set to this buffer
+  (`io.Writer`); `Job` exposes `OutputReader` and signals end of output by
+  closing the buffer. `close` on the buffer is idempotent (no duplicate wakeups).
+  The separation keeps process lifecycle concerns in `Job` and buffering/streaming
+  concerns in `outputBuffer`.
+  > Using the buffer as the `io.Writer` for stdout/stderr lets
+  `exec.Cmd` write via its internal `io.Copy`-based goroutines without exposing
+  `Write` on `Job`, and avoids the documented risk of blocking or deadlock when
+  using
   [StdoutPipe](https://pkg.go.dev/os/exec#Cmd.StdoutPipe)/
   [StderrPipe](https://pkg.go.dev/os/exec#Cmd.StderrPipe) together with
   [Wait](https://pkg.go.dev/os/exec#Cmd.Wait).
 - Each job has its own `context.Context` and `context.CancelFunc` for cancellation.
   The exec.Cmd is constructed using `exec.CommandContext` so calling Cancel()
   invokes the cancel function and process teardown.
-- An `Owner` string — the certificate CN of the client that created the job.
-  Set once at creation time and never modified.
+- **Owner and job ID** — set once at creation (certificate CN for owner). They are
+  not exported fields on `Job`; callers use `ID()` and `Owner()` getters so
+  identity cannot be reassigned from outside the package. `JobStatus` from
+  `Status()` follows the same pattern for id and owner.
 
 When a job is created (via `CreateJob`), the manager:
 
 1. Generates a UUID for the job.
 2. Creates an `exec.Cmd` from the argv (the first element is the
    executable, the remaining are arguments).
-3. Connects `cmd.Stdout` and `cmd.Stderr` to the job (`io.Writer`).
+3. Connects `cmd.Stdout` and `cmd.Stderr` to the job’s `outputBuffer` (`io.Writer`).
 4. Starts the process. (If `Start()` fails, the function returns an error
    and nothing is stored in the map so there is no entry for a failed job.)
 5. Launches a goroutine that calls `cmd.Wait()` and transitions the state to
@@ -152,15 +160,21 @@ When a job is created (via `CreateJob`), the manager:
 
 ### Output Streaming
 
-Process output is captured as an append-only in-memory list of chunks (`[][]byte`).
-Each `Write()` appends one chunk (a copy of the bytes written) under a mutex,
-then calls `sync.Cond.Broadcast()` to wake all waiting readers.
+Process output is captured by an `outputBuffer`: one append-only in-memory
+`[]byte`. Each `Write()` appends bytes under the buffer’s mutex, then calls
+`sync.Cond.Broadcast()` to wake all waiting readers. After `close`, further
+writes return `io.ErrClosedPipe`. Unit tests for this behavior live in
+`output_buffer_test.go`; `job_test.go` covers end-to-end streaming through a
+`Job`.
 
-Each streaming client maintains an independent chunk index into the buffer.
-When a client connects, it replays from index 0 (historical output in order), then
-follows live appends. When the reader’s index equals `len(chunks)` and the job is
-still running, the reader calls `sync.Cond.Wait()`, which suspends the goroutine
-until the next `Broadcast()` (new chunk, job finished, or context cancellation).
+Clients obtain an `io.ReadCloser` from `Job.OutputReader(ctx)` (one per
+client). Each reader maintains an independent byte offset into the shared
+buffer. The public API is a byte stream: `Read` copies into the caller’s
+buffer and may return fewer than `len(p)` bytes per call depending on how much
+data is available, while preserving order and binary-safe semantics. When the
+offset reaches `len(buffer)` and output is not yet closed, the reader calls
+`sync.Cond.Wait()`, which suspends the goroutine until the next `Broadcast()`
+(new data, buffer closed after process exit, or context cancellation).
 
 I chose `sync.Cond` over a channel-per-subscriber model after reading the
 [sync.Cond documentation](https://pkg.go.dev/sync#Cond). A channel fan-out
@@ -191,6 +205,15 @@ and confirmed it uses only the standard library. The existence of third-party
 wrappers like [Jille/contextcond](https://github.com/Jille/contextcond)
 suggests this is a known gap in `sync.Cond` but `context.AfterFunc` avoids
 the need for an external dependency.
+
+The `ctx` passed to `OutputReader` is stored on the reader and checked at
+the start of each `Read` loop iteration before copying from the replay
+buffer. If the client disconnects (or otherwise cancels the context) while
+historical bytes remain, the next `Read` returns `ctx.Err()` and does
+not continue draining the remainder—there is no separate callback whose
+cancellation semantics could disagree with the library. An in-flight `Read`
+may still complete normally; callers should `Close()` the reader when done
+to unregister `AfterFunc` and unblock any wait.
 
 ### gRPC Server
 
