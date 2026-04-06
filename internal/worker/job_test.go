@@ -98,9 +98,7 @@ func TestJobCancel(t *testing.T) {
 		t.Fatalf("expected Running, got %v", s.State)
 	}
 
-	if err := job.Cancel(); err != nil {
-		t.Fatalf("Cancel() error = %v", err)
-	}
+	job.Cancel()
 
 	testHelperWaitForState(t, job, JobStateStopped, 5*time.Second)
 
@@ -154,12 +152,21 @@ func TestJobWithStderrOutput(t *testing.T) {
 
 func testHelperWaitForState(t *testing.T, job *Job, want JobState, timeout time.Duration) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if job.Status().State == want {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	if job.Status().State == want {
+		return
 	}
-	t.Fatalf("job did not reach state %v within %v (current: %v)", want, timeout, job.Status().State)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for {
+		select {
+		case <-deadline.C:
+			t.Fatalf("job did not reach state %v within %v (current: %v)", want, timeout, job.Status().State)
+		case <-ticker.C:
+			if job.Status().State == want {
+				return
+			}
+		}
+	}
 }

@@ -12,14 +12,14 @@ type JobManager struct {
 	jobs map[string]*Job
 }
 
-// NewJobManager creates a new JobManager
+// creates a new JobManager
 func NewJobManager() *JobManager {
 	return &JobManager{
 		jobs: make(map[string]*Job),
 	}
 }
 
-// CreateJob creates and starts a new job
+// creates and starts a new job
 func (m *JobManager) CreateJob(owner string, argv []string) (string, error) {
 	id := uuid.New().String()
 
@@ -35,7 +35,7 @@ func (m *JobManager) CreateJob(owner string, argv []string) (string, error) {
 	return id, nil
 }
 
-// GetJob retrieves a job by ID
+// retrieves a job by ID
 func (m *JobManager) GetJob(id string) (*Job, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -47,11 +47,12 @@ func (m *JobManager) GetJob(id string) (*Job, error) {
 	return job, nil
 }
 
-// CancelJob cancels a running job by ID
+// cancels a running job by ID
 func (m *JobManager) CancelJob(id string) error {
 	job, err := m.GetJob(id)
 	if err != nil {
 		return err
 	}
-	return job.Cancel()
+	job.Cancel()
+	return nil
 }

@@ -89,15 +89,11 @@ func TestJobManagerCancelJob(t *testing.T) {
 		t.Fatalf("CancelJob() error = %v", err)
 	}
 
-	job, _ := m.GetJob(id)
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if job.Status().State == JobStateStopped {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	job, err := m.GetJob(id)
+	if err != nil {
+		t.Fatalf("GetJob() error = %v", err)
 	}
-	t.Fatalf("job did not reach stopped state, current: %v", job.Status().State)
+	testHelperWaitForState(t, job, JobStateStopped, 5*time.Second)
 }
 
 // verifies cancelling a job that doesn't exist returns error

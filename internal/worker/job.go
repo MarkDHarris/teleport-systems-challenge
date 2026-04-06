@@ -150,16 +150,15 @@ func (j *Job) Status() JobStatus {
 	}
 }
 
-// Cancel attempts to stop the job
-func (j *Job) Cancel() error {
+// requests that the job stops
+func (j *Job) Cancel() {
 	j.mu.Lock()
 	if j.state != JobStateRunning {
 		j.mu.Unlock()
-		return nil
+		return
 	}
 	j.stopped = true
 	j.mu.Unlock()
 
 	j.cancel()
-	return nil
 }
