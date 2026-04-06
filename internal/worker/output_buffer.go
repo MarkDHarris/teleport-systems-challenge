@@ -95,10 +95,6 @@ func (r *outputBufferReader) Read(p []byte) (n int, err error) {
 			return 0, io.EOF
 		}
 
-		if r.ctx.Err() != nil {
-			return 0, r.ctx.Err()
-		}
-
 		b.cond.Wait()
 	}
 }
