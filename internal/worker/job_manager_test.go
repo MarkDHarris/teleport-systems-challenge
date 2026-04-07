@@ -116,16 +116,14 @@ func TestJobManagerConcurrentCreation(t *testing.T) {
 	errs := make(chan error, numGoroutines)
 
 	for i := 0; i < numGoroutines; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			id, err := m.CreateJob("mark", []string{"/bin/echo", fmt.Sprintf("concurrent-%d", i)})
 			if err != nil {
 				errs <- err
 				return
 			}
 			ids <- id
-		}()
+		})
 	}
 
 	wg.Wait()

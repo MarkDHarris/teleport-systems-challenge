@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"sync"
-	"sync/atomic"
 )
 
 type outputBuffer struct {
@@ -47,7 +46,12 @@ func (b *outputBuffer) close() {
 }
 
 func (b *outputBuffer) newReader(ctx context.Context) io.ReadCloser {
-	r := &outputBufferReader{buf: b, ctx: ctx}
+	readCtx, cancelCause := context.WithCancelCause(ctx)
+	r := &outputBufferReader{
+		buf:         b,
+		ctx:         readCtx,
+		cancelCause: cancelCause,
+	}
 	r.stopAfterFunc = context.AfterFunc(ctx, func() {
 		b.mu.Lock()
 		defer b.mu.Unlock()
@@ -59,9 +63,22 @@ func (b *outputBuffer) newReader(ctx context.Context) io.ReadCloser {
 type outputBufferReader struct {
 	buf           *outputBuffer
 	ctx           context.Context
+	cancelCause   context.CancelCauseFunc
 	stopAfterFunc func() bool
 	readPos       int
-	closed        atomic.Bool
+	closeOnce     sync.Once
+}
+
+// readCtxErr returns the reason reads must stop: explicit cancel cause if set, else ctx.Err().
+func readCtxErr(ctx context.Context) error {
+	err := ctx.Err()
+	if err == nil {
+		return nil
+	}
+	if c := context.Cause(ctx); c != nil {
+		return c
+	}
+	return err
 }
 
 // implements io.Reader and reads from the output buffer
@@ -69,8 +86,8 @@ func (r *outputBufferReader) Read(p []byte) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-	if r.closed.Load() {
-		return 0, io.ErrClosedPipe
+	if err := readCtxErr(r.ctx); err != nil {
+		return 0, err
 	}
 
 	b := r.buf
@@ -78,11 +95,8 @@ func (r *outputBufferReader) Read(p []byte) (n int, err error) {
 	defer b.mu.Unlock()
 
 	for {
-		if r.closed.Load() {
-			return 0, io.ErrClosedPipe
-		}
-		if r.ctx.Err() != nil {
-			return 0, r.ctx.Err()
+		if err := readCtxErr(r.ctx); err != nil {
+			return 0, err
 		}
 
 		if r.readPos < len(b.data) {
@@ -101,21 +115,15 @@ func (r *outputBufferReader) Read(p []byte) (n int, err error) {
 
 // implements io.Closer and signals the reader to stop waiting
 func (r *outputBufferReader) Close() error {
-	if r.closed.Swap(true) {
-		return nil
-	}
-	if r.stopAfterFunc != nil {
-		r.stopAfterFunc()
-	}
-	buf := r.buf
-	buf.mu.Lock()
-	buf.cond.Broadcast()
-	buf.mu.Unlock()
+	r.closeOnce.Do(func() {
+		r.cancelCause(io.ErrClosedPipe)
+		if r.stopAfterFunc != nil {
+			r.stopAfterFunc()
+		}
+		buf := r.buf
+		buf.mu.Lock()
+		buf.cond.Broadcast()
+		buf.mu.Unlock()
+	})
 	return nil
-}
-
-func (b *outputBuffer) bytesLen() int {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return len(b.data)
 }

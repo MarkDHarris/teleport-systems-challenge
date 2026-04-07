@@ -117,7 +117,7 @@ func TestJobWithStdoutOutput(t *testing.T) {
 
 	testHelperWaitForState(t, job, JobStateCompleted, 5*time.Second)
 
-	r := job.OutputReader(context.Background())
+	r := job.OutputReader(t.Context())
 	output, err := io.ReadAll(r)
 	_ = r.Close()
 	if err != nil {
@@ -138,7 +138,7 @@ func TestJobWithStderrOutput(t *testing.T) {
 
 	testHelperWaitForState(t, job, JobStateCompleted, 5*time.Second)
 
-	r := job.OutputReader(context.Background())
+	r := job.OutputReader(t.Context())
 	output, err := io.ReadAll(r)
 	_ = r.Close()
 	if err != nil {
@@ -150,23 +150,60 @@ func TestJobWithStderrOutput(t *testing.T) {
 	}
 }
 
+func TestJobDoneChannel(t *testing.T) {
+	t.Run("completed", func(t *testing.T) {
+		job, err := Start("job-done-completed", "mark", []string{"/bin/echo", "ok"})
+		if err != nil {
+			t.Fatalf("Start() error = %v", err)
+		}
+		select {
+		case <-job.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("Done() did not close")
+		}
+		if job.Status().State != JobStateCompleted {
+			t.Errorf("state = %v, want Completed", job.Status().State)
+		}
+	})
+	t.Run("failed", func(t *testing.T) {
+		job, err := Start("job-done-failed", "mark", []string{"/bin/sh", "-c", "exit 1"})
+		if err != nil {
+			t.Fatalf("Start() error = %v", err)
+		}
+		select {
+		case <-job.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("Done() did not close")
+		}
+		if job.Status().State != JobStateFailed {
+			t.Errorf("state = %v, want Failed", job.Status().State)
+		}
+	})
+	t.Run("stopped", func(t *testing.T) {
+		job, err := Start("job-done-stopped", "mark", []string{"/bin/sleep", "300"})
+		if err != nil {
+			t.Fatalf("Start() error = %v", err)
+		}
+		job.Cancel()
+		select {
+		case <-job.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("Done() did not close")
+		}
+		if job.Status().State != JobStateStopped {
+			t.Errorf("state = %v, want Stopped", job.Status().State)
+		}
+	})
+}
+
 func testHelperWaitForState(t *testing.T, job *Job, want JobState, timeout time.Duration) {
 	t.Helper()
-	if job.Status().State == want {
-		return
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
+	if err := job.Wait(ctx); err != nil {
+		t.Fatalf("job did not complete within %v: %v (current state: %v)", timeout, err, job.Status().State)
 	}
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-	deadline := time.NewTimer(timeout)
-	defer deadline.Stop()
-	for {
-		select {
-		case <-deadline.C:
-			t.Fatalf("job did not reach state %v within %v (current: %v)", want, timeout, job.Status().State)
-		case <-ticker.C:
-			if job.Status().State == want {
-				return
-			}
-		}
+	if got := job.Status().State; got != want {
+		t.Fatalf("job state = %v, want %v", got, want)
 	}
 }

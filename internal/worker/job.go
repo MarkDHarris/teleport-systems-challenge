@@ -62,6 +62,8 @@ type Job struct {
 	cancel       context.CancelFunc
 	stopped      bool
 	outputBuffer *outputBuffer
+	done         chan struct{}
+	doneOnce     sync.Once
 }
 
 // ID returns the job identifier
@@ -87,6 +89,7 @@ func Start(id, owner string, argv []string) (*Job, error) {
 		cmd:          cmd,
 		cancel:       cancel,
 		outputBuffer: newOutputBuffer(),
+		done:         make(chan struct{}),
 	}
 	cmd.Stdout = j.outputBuffer
 	cmd.Stderr = j.outputBuffer
@@ -107,6 +110,7 @@ func Start(id, owner string, argv []string) (*Job, error) {
 			j.exitCode = -1
 			j.mu.Unlock()
 			j.outputBuffer.close()
+			j.signalDone()
 			return
 		}
 
@@ -120,6 +124,7 @@ func Start(id, owner string, argv []string) (*Job, error) {
 			}
 			j.mu.Unlock()
 			j.outputBuffer.close()
+			j.signalDone()
 			return
 		}
 
@@ -127,9 +132,29 @@ func Start(id, owner string, argv []string) (*Job, error) {
 		j.exitCode = 0
 		j.mu.Unlock()
 		j.outputBuffer.close()
+		j.signalDone()
 	}()
 
 	return j, nil
+}
+
+func (j *Job) signalDone() {
+	j.doneOnce.Do(func() { close(j.done) })
+}
+
+// returns a channel that is closed when the job reaches a terminal state
+func (j *Job) Done() <-chan struct{} {
+	return j.done
+}
+
+// blocks until the job completes, ctx is canceled, or ctx's deadline elapses
+func (j *Job) Wait(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-j.done:
+		return nil
+	}
 }
 
 // returns io.ReadCloser that replays the job's output from the

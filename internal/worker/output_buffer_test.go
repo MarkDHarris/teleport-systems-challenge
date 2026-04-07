@@ -1,64 +1,16 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 )
-
-// verifies that OutputBuffer correctly accumulates written bytes and delivers them to readers
-func TestOutputBufferWriteAppendsBytes(t *testing.T) {
-	tests := []struct {
-		name   string
-		writes []string
-		want   int // total bytes in buffer
-	}{
-		{
-			name:   "single write",
-			writes: []string{"teleport"},
-			want:   len("teleport"),
-		},
-		{
-			name:   "multiple writes",
-			writes: []string{"go", " ", "teleport"},
-			want:   len("go") + len(" ") + len("teleport"),
-		},
-		{
-			name:   "no write",
-			writes: nil,
-			want:   0,
-		},
-		{
-			name:   "empty write",
-			writes: []string{""},
-			want:   0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			b := newOutputBuffer()
-
-			for _, w := range tt.writes {
-				n, err := b.Write([]byte(w))
-				if err != nil {
-					t.Fatalf("Write() error = %v", err)
-				}
-				if n != len(w) {
-					t.Errorf("Write() wrote %d bytes, want %d", n, len(w))
-				}
-			}
-
-			if got := b.bytesLen(); got != tt.want {
-				t.Errorf("bytesLen() = %d, want %d", got, tt.want)
-			}
-		})
-	}
-}
 
 // verifies that writing to OutputBuffer after close returns an error
 func TestOutputBufferWriteAfterClose(t *testing.T) {
@@ -84,7 +36,7 @@ func TestOutputBufferReadAfterClose(t *testing.T) {
 	}
 	b.close()
 
-	r := b.newReader(context.Background())
+	r := b.newReader(t.Context())
 	if err := r.Close(); err != nil {
 		t.Fatalf("Close() = %v", err)
 	}
@@ -97,14 +49,12 @@ func TestOutputBufferReadAfterClose(t *testing.T) {
 // verifies that OutputBuffer's new readers respect context cancellation before any data delivery
 func TestOutputBufferReadRespectsCancel(t *testing.T) {
 	b := newOutputBuffer()
-	for range 20 {
-		if _, err := b.Write([]byte("x")); err != nil {
-			t.Fatalf("Write() error = %v", err)
-		}
+	if _, err := b.Write([]byte(strings.Repeat("x", 20))); err != nil {
+		t.Fatalf("Write() error = %v", err)
 	}
 	b.close()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	r := b.newReader(ctx)
@@ -126,7 +76,7 @@ func TestOutputBufferReadCannotMutateBuffer(t *testing.T) {
 	}
 	b.close()
 
-	r := b.newReader(context.Background())
+	r := b.newReader(t.Context())
 	p := make([]byte, 5)
 	if _, err := io.ReadFull(r, p); err != nil {
 		t.Fatalf("ReadFull() error = %v", err)
@@ -136,7 +86,7 @@ func TestOutputBufferReadCannotMutateBuffer(t *testing.T) {
 		t.Fatalf("Close() = %v", err)
 	}
 
-	r2 := b.newReader(context.Background())
+	r2 := b.newReader(t.Context())
 	got, err := io.ReadAll(r2)
 	if err != nil {
 		t.Fatalf("ReadAll() error = %v", err)
@@ -146,40 +96,30 @@ func TestOutputBufferReadCannotMutateBuffer(t *testing.T) {
 	}
 }
 
-// verifies that OutputBuffer can handle interleaved writes and reads
+// verifies that OutputBuffer delivers written text via ReadAll (empty write does not add bytes)
 func TestOutputBufferReadText(t *testing.T) {
 	b := newOutputBuffer()
+	want := "line 1\nline 2\nline 3\nline 4\nline 5\n"
 
-	var err error
-	_, err = b.Write([]byte("line 1\n"))
+	_, err := b.Write([]byte(want))
 	if err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
-	_, err = b.Write([]byte("line 2\n"))
+	n, err := b.Write(nil) // empty write: must not change total output
 	if err != nil {
-		t.Fatalf("Write() error = %v", err)
+		t.Fatalf("Write(nil) error = %v", err)
 	}
-	_, err = b.Write([]byte("line 3\n"))
-	if err != nil {
-		t.Fatalf("Write() error = %v", err)
-	}
-	_, err = b.Write([]byte("line 4\n"))
-	if err != nil {
-		t.Fatalf("Write() error = %v", err)
-	}
-	_, err = b.Write([]byte("line 5\n"))
-	if err != nil {
-		t.Fatalf("Write() error = %v", err)
+	if n != 0 {
+		t.Fatalf("Write(nil) = %d bytes, want 0", n)
 	}
 	b.close()
 
-	r := b.newReader(context.Background())
+	r := b.newReader(t.Context())
 	got, err := io.ReadAll(r)
 	if err != nil {
 		t.Fatalf("ReadAll() error = %v", err)
 	}
 
-	want := "line 1\nline 2\nline 3\nline 4\nline 5\n"
 	if string(got) != want {
 		t.Fatalf("ReadAll() = %q, want %q", got, want)
 	}
@@ -189,34 +129,22 @@ func TestOutputBufferReadText(t *testing.T) {
 func TestOutputBufferReadBinary(t *testing.T) {
 	b := newOutputBuffer()
 
-	want := []byte{0x74, 0x65, 0x6c, 0x65, 0x70, 0x6f, 0x72, 0x74}
+	chunk := []byte{0x74, 0x65, 0x6c, 0x65, 0x70, 0x6f, 0x72, 0x74}
+	payload := bytes.Repeat(chunk, 5)
 
-	var err error
-	for i := 0; i < 5; i++ {
-		_, err = b.Write(want)
-		if err != nil {
-			t.Fatalf("Write() error = %v", err)
-		}
+	if _, err := b.Write(payload); err != nil {
+		t.Fatalf("Write() error = %v", err)
 	}
 	b.close()
 
-	r := b.newReader(context.Background())
+	r := b.newReader(t.Context())
 	got, err := io.ReadAll(r)
 	if err != nil {
 		t.Fatalf("ReadAll() error = %v", err)
 	}
 
-	expected := make([]byte, 0, len(want)*5)
-	for i := 0; i < 5; i++ {
-		expected = append(expected, want...)
-	}
-	if len(got) != len(expected) {
-		t.Fatalf("len(got) = %d, want %d", len(got), len(expected))
-	}
-	for i := range expected {
-		if got[i] != expected[i] {
-			t.Errorf("got[%d] = %x, want %x", i, got[i], expected[i])
-		}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("ReadAll() = %x, want %x", got, payload)
 	}
 }
 
@@ -227,8 +155,10 @@ func TestOutputBufferLiveWrites(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		r := b.newReader(context.Background())
+		r := b.newReader(t.Context())
 		defer r.Close()
+		defer close(errCh)
+		defer close(received)
 
 		buf := make([]byte, 256)
 		for {
@@ -237,16 +167,14 @@ func TestOutputBufferLiveWrites(t *testing.T) {
 				received <- string(buf[:n])
 			}
 			if errors.Is(err, io.EOF) {
-				break
+				errCh <- nil
+				return
 			}
 			if err != nil {
 				errCh <- err
-				close(received)
 				return
 			}
 		}
-		close(received)
-		errCh <- nil
 	}()
 
 	var got []string
@@ -282,7 +210,7 @@ func TestOutputBufferReadCancelWhileWaiting(t *testing.T) {
 		t.Fatalf("Write() error = %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 
 	done := make(chan error, 1)
 	handshake := make(chan struct{})
@@ -338,7 +266,7 @@ func TestOutputBufferMultipleConcurrentReaders(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 
-			r := b.newReader(context.Background())
+			r := b.newReader(t.Context())
 			data, err := io.ReadAll(r)
 			_ = r.Close()
 
@@ -356,10 +284,9 @@ func TestOutputBufferMultipleConcurrentReaders(t *testing.T) {
 	b.close()
 
 	wg.Wait()
-	close(errCh)
 
-	for err := range errCh {
-		if err != nil {
+	for range numReaders {
+		if err := <-errCh; err != nil {
 			t.Fatalf("reader error: %v", err)
 		}
 	}
