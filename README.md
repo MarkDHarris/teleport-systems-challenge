@@ -1,34 +1,168 @@
-# JobWorkerService
+# [Teleport Job Worker Service — Systems Challenge](https://github.com/gravitational/careers/blob/main/challenges/systems/challenge-1.md)
 
-A secure Go-based job worker service for executing and managing Linux processes via API and CLI.
+A secure Go service for **remote job execution** on a single Linux host: start processes without shell interpretation, stream **binary-safe** stdout/stderr, query status, and cancel jobs. The API is **gRPC over mTLS** (TLS 1.3); identity comes from **client X.509 certificates** (CN = owner, OU `admin` = administrator).
 
-This repository provides a remote Linux job execution library with features to start processes
-without shell interpretation, stream stdout/stderr from the remote process, and manage lifecycle (status, cancel).
+| Component | Role |
+|-----------|------|
+| **`internal/worker`** | Process lifecycle, `sync.Mutex`/`sync.Cond` output buffer, no network imports |
+| **`internal/server`** | gRPC + mTLS, unary/stream auth interceptors, owner/admin authorization |
+| **`cmd/server`** | TLS flags, `GracefulStop` on SIGINT/SIGTERM |
+| **`cmd/jobctl`** | Cobra CLI (`start`, `status`, `watch`, `cancel`) |
+
+Design rationale and trade-offs: [docs/0001-Secure-Job-Worker-with-API-and-CLI.md](docs/0001-Secure-Job-Worker-with-API-and-CLI.md).
+
+---
+
+## Git clone → make → run
+
+TLS keys and certificates are **not committed** (see [`.gitignore`](.gitignore)). After cloning, generate test PEMs once, build, then run the server and CLI.
+
+### 1. Clone and enter the repo
+
+```bash
+git clone https://github.com/MarkDHarris/teleport-systems-challenge.git
+cd teleport-systems-challenge
+```
+
+### 2. Generate mTLS certificates
+
+Requires **[OpenSSL](https://www.openssl.org/)** on your `PATH` (macOS/Linux usually have it).
+
+```bash
+make certs
+```
+
+This runs [`scripts/generate-certs.sh`](scripts/generate-certs.sh) and writes PEM files under **`scripts/certs/`** (CA, server, and clients `mark`, `tim`, `admin`). Re-run anytime to rotate local test material (overwrites existing files in that directory).
+
+### 3. Build binaries
+
+```bash
+make build
+```
+
+Produces **`bin/server`** (daemon) and **`bin/jobctl`** (CLI).
+
+### 4. Run (two terminals)
+
+**Terminal 1 — server**
+
+```bash
+./bin/server -listen :50055 \
+  -cert scripts/certs/server.crt -key scripts/certs/server.key -ca scripts/certs/ca.crt
+```
+
+**Terminal 2 — CLI** (example user **mark**)
+
+```bash
+CERTS=(--cert scripts/certs/mark.crt --key scripts/certs/mark.key --ca scripts/certs/ca.crt)
+
+./bin/jobctl --server localhost:50055 "${CERTS[@]}" start -- /bin/echo hello
+# Note the printed job id, then:
+./bin/jobctl --server localhost:50055 "${CERTS[@]}" status <job-id>
+
+./bin/jobctl --server localhost:50055 "${CERTS[@]}" watch <job-id>
+```
+
+That is the full **clone → `make certs` → `make build` → run** path.
+
+### Optional: tests and lint
+
+Integration tests expect the same **`scripts/certs/`** paths as above. After `make certs`:
+
+```bash
+make test              # or: make check  (fmt + lint + test; needs: make install-tools first for lint)
+```
+
+---
+
+## Features
+
+- **No shell injection by default** — `exec.Command` with argv slice; use `/bin/sh -c "..."` only if you need shell features.
+- **mTLS** — mutual authentication; **TLS 1.3** only; RSA-4096 leaf certs; **ClientAuth** / **ServerAuth** EKU enforced on verify.
+- **Owner-scoped jobs** — job owner = client cert **CN**; **OU** equal to `admin` (case-insensitive) grants full access.
+- **Concurrent output** — multiple `watch` clients, independent read positions; `context.AfterFunc` wakes `sync.Cond` on stream cancel.
+- **Tests** — race detector on `make test`; integration tests use `scripts/certs/` (generate with **`make certs`** first).
+
+Non-goals (by design): clustering, persistence, process groups, interactive stdin — see the design doc.
+
+---
 
 ## Requirements
 
-- [Go](https://go.dev/dl/) 1.26 or newer (see `go.mod`)
+- **Go** [1.26+](https://go.dev/dl/) (see [`go.mod`](go.mod))
+- **OpenSSL** — for **`make certs`** only
+- **`make lint` / `make check`:** install the pinned linter: `make install-tools` (adds `golangci-lint` to `GOPATH/bin`)
+- **`make proto`:** [`protoc`](https://grpc.io/docs/protoc-installation/) and Go plugins:
+  ```bash
+  go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+  go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+  ```
 
-## Quick start
+---
 
-```bash
-git clone https://github.com/MarkDHarris/JobWorkerService.git
-cd JobWorkerService
-make test
+## Repository layout
+
 ```
+.
+├── api/v1/              # worker.proto + generated *.pb.go (committed)
+├── cmd/jobctl/          # CLI client
+├── cmd/server/          # gRPC server daemon
+├── internal/server/     # TLS helpers, auth, WorkerService implementation
+├── internal/worker/     # Job, JobManager, output buffer
+├── scripts/
+│   ├── generate-certs.sh
+│   └── certs/           # generated by `make certs` (gitignored)
+├── docs/                # RFD / design notes
+├── Makefile
+└── README.md
+```
+
+---
+
+### `jobctl` subcommands
+
+| Command | gRPC | Notes |
+|---------|------|--------|
+| `start [--] <argv>...` | `CreateJob` | Use `start -- /path/to/cmd ...` when argv contains tokens that look like flags (e.g. `find -name`). |
+| `status <job_id>` | `GetStatus` | Prints job id, owner, state. |
+| `watch <job_id>` | `WatchJobOutput` | Writes raw bytes to stdout; Ctrl+C cancels. |
+| `cancel <job_id>` | `CancelJob` | Idempotent if the job already finished. |
+
+Global flags: `--server` (default `localhost:50055`), `--cert`, `--key`, `--ca` (all required). Help: `jobctl help`, `jobctl help start`, etc.
+
+---
 
 ## Make targets
 
 | Target | Description |
 |--------|-------------|
-| `make test` | Run all tests with `-race`, `-count=1`, and verbose output |
-| `make test-coverage` | Run all tests with `-race`, `-count=1`, coverage profile (`coverage.out`) and `go tool cover -func` summary |
-| `make coverage-html` | HTML report (`coverage.html`; depends on `test-coverage`) |
-| `make fmt` | Run `go fmt ./...` (rewrite) |
-| `make fmt-check` | Fail if any file needs `gofmt` (read-only) |
-| `make lint` | Run `fmt-check`, then `golangci-lint run ./...` |
-| `make clean` | Remove artifacts |
-| `make install-tools` | Install the Makefile’s pinned `golangci-lint` version |
+| `make` / `make help` | List targets |
+| **`make certs`** | **Generate mTLS PEMs under `scripts/certs/`** (OpenSSL; required for local run/tests) |
+| `make build` | Build `bin/server` and `bin/jobctl` with `-trimpath` |
+| `make test` | All packages, `-race -count=1`, verbose |
+| `make test-coverage` | Coverage profile `coverage.out` for `internal/...` and `cmd/jobctl`; `go tool cover -func` summary |
+| `make coverage-html` | Writes `coverage.html` |
+| `make fmt` | `go fmt ./...` |
+| `make fmt-check` | Fail if `gofmt` would change files |
+| `make lint` | `fmt-check` + `golangci-lint run ./...` |
+| `make check` | `fmt-check` + `lint` + `test` |
+| `make proto` | Regenerate Go from `api/v1/worker.proto` |
+| `make clean` | Remove coverage artifacts and `bin/` |
+| `make install-tools` | Install Makefile-pinned `golangci-lint` |
+
+---
+
+## Regenerating protobuf
+
+After editing `api/v1/worker.proto`:
+
+```bash
+make proto
+```
+
+Commit the updated `*.pb.go` files (this repo keeps generated code in version control for simple `go build`).
+
+---
 
 ## License
 

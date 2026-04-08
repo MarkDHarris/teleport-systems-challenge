@@ -1,0 +1,11 @@
+version: "2"
+
+linters:
+  enable:
+    - revive
+  settings:
+    revive:
+      severity: warning
+      rules:
+        - name: exported
+          disabled: false

@@ -64,7 +64,7 @@ func authorize(caller callerIdentity, jobOwner string) error {
 	if caller.IsAdmin || caller.CN == jobOwner {
 		return nil
 	}
-	return status.Error(codes.PermissionDenied, "caller is not owner or admin")
+	return status.Error(codes.PermissionDenied, "permission denied: only the job owner or an admin can perform this action")
 }
 
 // gRPC interceptor to extract caller identity from mTLS cert and add it to context

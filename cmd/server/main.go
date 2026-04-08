@@ -1,4 +1,4 @@
-// Command jobworker runs the gRPC job worker server with mTLS.
+// Command server runs the gRPC job worker daemon with mTLS.
 //
 // == Linux systems note: signal handling ==
 //
@@ -63,7 +63,7 @@ func main() {
 	}
 
 	// Log the TLS version for verification.
-	fmt.Printf("jobworker server listening on %s (TLS 1.3, mTLS enabled)\n",
+	fmt.Printf("server listening on %s (TLS 1.3, mTLS enabled)\n",
 		*listenAddr)
 
 	// Graceful shutdown on SIGINT (Ctrl+C) or SIGTERM (kill).

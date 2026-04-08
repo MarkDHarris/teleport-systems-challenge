@@ -121,6 +121,9 @@ func (s *Server) authorizedJob(ctx context.Context, jobID string) (*worker.Job, 
 	}
 	job, err := s.manager.GetJob(jobID)
 	if err != nil {
+		if errors.Is(err, worker.ErrJobNotFound) {
+			return nil, status.Errorf(codes.NotFound, "job %s not found", jobID)
+		}
 		return nil, mapDomainError(err)
 	}
 	if err := authorize(caller, job.Owner()); err != nil {

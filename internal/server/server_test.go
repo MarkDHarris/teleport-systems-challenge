@@ -166,7 +166,7 @@ func TestCreateJobNonexistentExecutable(t *testing.T) {
 	defer cancel()
 
 	_, err := env.markClient.CreateJob(ctx, &workerv1.CreateJobRequest{
-		Argv: []string{"/nonexistent/jobworker-test-binary"},
+		Argv: []string{"/nonexistent/server-test-binary"},
 	})
 	if err == nil {
 		t.Fatal("expected error for nonexistent executable")
@@ -392,6 +392,9 @@ func TestGetStatusNotFound(t *testing.T) {
 	}
 	if st.Code() != codes.NotFound {
 		t.Errorf("code = %v, want NotFound", st.Code())
+	}
+	if got := st.Message(); got != "job nonexistent-id not found" {
+		t.Errorf("message = %q, want job id in not-found text", got)
 	}
 }
 
