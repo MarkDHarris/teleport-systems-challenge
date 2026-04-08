@@ -9,7 +9,8 @@ service WorkerService {
   // Starts a process and returns a job ID. Caller becomes the owner.
   rpc CreateJob(CreateJobRequest) returns (CreateJobResponse);
 
-  // Kills the job's process group (SIGKILL). Idempotent.
+  // Stops the job by cancelling the process context (same semantics as the
+  // worker library: direct child only, not a full process group). Idempotent.
   rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
 
   // Returns current state, exit code, and owner.
@@ -47,9 +48,12 @@ message GetStatusRequest {
 }
 
 message GetStatusResponse {
-  JobState state = 1;
-  int32 exit_code = 2; // -1 while running
-  string owner = 3;
+  string job_id = 1;
+  JobState state = 2;
+  // Process exit status: -1 while RUNNING; after exit, 0 for success, non-zero for failure,
+  // or -1 when STOPPED (cancelled).
+  int32 exit_code = 3;
+  string owner = 4;
 }
 
 message WatchJobOutputRequest {
